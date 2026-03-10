@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>我的花園世界-競賽管理</title>
+    <style>
+        :root { --bg-color: #f0f2f5; --card-bg: #ffffff; --complete-red: #ff4d4f; --reserve-yellow: #ffc107; --primary-blue: #007bff; --light-yellow: #fff9c4; }
+        body { font-family: "Microsoft JhengHei", sans-serif; background-color: var(--bg-color); margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; }
+        
+        /* 控制面板 */
+        .control-panel { position: fixed; top: 10px; left: 10px; z-index: 1000; display: flex; gap: 5px; align-items: center; }
+        #system-clock { font-size: 13px; font-weight: bold; color: white; background: var(--primary-blue); padding: 5px 10px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+        .btn-refresh { background: #333; color: white; border: none; padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer; }
+        #sync-status { font-size: 10px; color: #666; background: rgba(255,255,255,0.7); padding: 2px 5px; border-radius: 4px; }
+
+        /* 網格容器佈局 */
+        .grid-container { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); 
+            gap: 8px; 
+            width: 100%; 
+            max-width: 1000px; 
+            margin-top: 45px; 
+            padding: 0;
+        }
+
+        /* 📱 手機版專屬：強制固定三等份且不跑版 */
+        @media (max-width: 600px) {
+            .grid-container {
+                grid-template-columns: repeat(3, 1fr) !important; 
+                gap: 5px;
+            }
+            .grid-item {
+                padding: 8px 4px !important;
+                min-height: 220px !important; /* 統一度，且容納 5 筆紀錄 */
+            }
+            .task-name {
+                font-size: 11px !important;
+                word-break: break-all;
+            }
+            .log-entry {
+                font-size: 8px !important;
+            }
+        }
+        
+        /* 格子樣式 */
+        .grid-item { 
+            background: var(--card-bg); 
+            border: 1px solid #ddd; 
+            border-radius: 8px; 
+            position: relative; 
+            padding: 12px 6px; 
+            display: flex; 
+            flex-direction: column; 
+            min-height: 240px; 
+            transition: background-color 0.3s; 
+            box-sizing: border-box; /* 關鍵：防止 padding 撐開寬度 */
+            overflow: hidden;
+        }
+        
+        .item-number { position: absolute; top: 0; right: 0; background-color: #f0f0f0; color: #888888; font-size: 16px; font-weight: 900; padding: 2px 8px; border-radius: 0 8px 0 8px; }
+        .status-active { background-color: var(--light-yellow) !important; }
+
+        .task-name { font-weight: bold; color: #444; font-size: 13px; text-align: center; margin-top: 20px; min-height: 32px; display: flex; align-items: center; justify-content: center; }
+        .assignee { font-size: 11px; color: #666; text-align: center; margin-bottom: 5px; font-weight: bold; }
+        
+        /* 歷史紀錄區塊 */
+        .history-section { font-size: 9px; color: #777; background: rgba(255,255,255,0.4); border-radius: 4px; padding: 5px; margin-top: auto; border-top: 1px solid #eee; min-height: 85px; }
+        .history-title { font-weight: bold; color: #444; font-size: 10px; display: block; margin-bottom: 3px; }
+        .log-entry { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; border-bottom: 1px inset rgba(0,0,0,0.05); }
+
+        .complete-stamp { position: absolute; color: var(--complete-red); font-weight: 900; font-size: 16px; border: 2px solid var(--complete-red); padding: 2px 5px; border-radius: 4px; transform: rotate(15deg); display: none; z-index: 2; background: rgba(255,255,255,0.8); left: 10px; top: 45px; pointer-events: none; }
+        
+        .button-group { display: flex; gap: 3px; margin-top: 5px; }
+        .btn { flex: 1; border: none; padding: 6px 0; border-radius: 4px; color: white; font-size: 10px; font-weight: bold; cursor: pointer; }
+        .btn-reserve { background: var(--reserve-yellow); color: #333; }
+        .btn-complete { background: #28a745; }
+        
+        /* 彈窗 */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 100; }
+        .modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 15px; width: 85%; max-width: 300px; z-index: 101; }
+        .search-input { width: 100%; padding: 10px; margin-bottom: 10px; border: 2px solid var(--primary-blue); border-radius: 8px; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+    <div class="control-panel">
+        <div id="system-clock">時間載入中...</div>
+        <button class="btn-refresh" onclick="autoSyncData()">🔄 更新</button>
+        <span id="sync-status">待命</span>
+    </div>
+
+    <h1>公會競賽任務管理</h1>
+    <div id="loading" style="color: blue; font-size: 14px;">📡 正在同步資料...</div>
+    <div class="grid-container" id="mainGrid"></div>
+
+    <div class="modal-overlay" id="overlay" onclick="closeModal()"></div>
+    <div class="modal" id="taskModal">
+        <h3 style="margin:0 0 10px 0">認領任務</h3>
+        <input type="text" id="taskSearch" class="search-input" placeholder="🔍 搜尋任務名稱..." oninput="filterTasks()">
+        <select id="taskSelect" style="width:100%; padding:10px; margin-bottom:10px;"></select>
+        <select id="userSelect" style="width:100%; padding:10px; margin-bottom:10px;"></select>
+        <button class="btn btn-reserve" style="width:100%; padding:12px; font-size:14px" onclick="confirmTask()">確認儲存並同步</button>
+    </div>
+
+    <script>
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyT64IkZksYdYkLHFXiZu22AIV5yew5q3JuZJuRrnTp8_Iy9vVl7Jh9efFfH2G3voT8/exec";
+        let activeBoxId = null;
+        let flowerOwnersMap = {}; 
+        let allTasksBackup = [];
+        let isSyncing = false;
+
+        window.onload = () => { 
+            createGrid(); 
+            initClock();
+            initData(); 
+            setInterval(autoSyncData, 30000); 
+        };
+
+        function initClock() {
+            const update = () => {
+                const now = new Date();
+                document.getElementById('system-clock').innerText = `${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+            };
+            update(); setInterval(update, 1000);
+        }
+
+        function createGrid() {
+            const container = document.getElementById('mainGrid');
+            for (let i = 1; i <= 66; i++) {
+                const item = document.createElement('div');
+                item.className = 'grid-item';
+                item.id = `box-${i}`;
+                item.innerHTML = `
+                    <div class="item-number">${i}</div>
+                    <div class="complete-stamp" id="stamp-${i}">(已完成)</div>
+                    <div class="task-name" id="name-${i}">載入中</div>
+                    <div class="assignee" id="user-${i}">-</div>
+                    <div class="history-section">
+                        <span class="history-title">🕒 近5次紀錄</span>
+                        <div id="log-list-${i}"></div>
+                    </div>
+                    <div class="button-group">
+                        <button class="btn btn-reserve" onclick="markAction(${i}, 'reserve')">保留</button>
+                        <button class="btn btn-complete" onclick="markAction(${i}, 'complete')">完成</button>
+                    </div>`;
+                container.appendChild(item);
+            }
+        }
+
+        function updateUI(id, task, user, status, cloudHistory = "") {
+            const nameEl = document.getElementById(`name-${id}`);
+            const userEl = document.getElementById(`user-${id}`);
+            const stamp = document.getElementById(`stamp-${id}`);
+            const box = document.getElementById(`box-${id}`);
+            const logListEl = document.getElementById(`log-list-${id}`);
+            
+            if (task !== undefined) nameEl.innerText = task || "等待任務";
+            if (user !== undefined) userEl.innerText = user ? `接取：${user}` : "-";
+            
+            if (status === '已完成') {
+                stamp.style.display = 'block';
+                box.classList.add('status-active');
+                nameEl.style.opacity = "0.2";
+            } else if (status === '已保留' || (status && status !== '等待任務')) {
+                stamp.style.display = 'none';
+                box.classList.add('status-active');
+                nameEl.style.opacity = "1";
+            } else {
+                stamp.style.display = 'none';
+                box.classList.remove('status-active');
+                nameEl.style.opacity = "1";
+            }
+
+            if (cloudHistory) {
+                const logs = cloudHistory.split("|");
+                logListEl.innerHTML = logs.map((text, i) => {
+                    const isComplete = text.includes("完成");
+                    return `<span class="log-entry" style="color:${isComplete?'#28a745':'#d68a00'}">${i+1}. ${text}</span>`;
+                }).join('');
+            } else {
+                logListEl.innerHTML = '<span style="color:#ccc">暫無紀錄</span>';
+            }
+        }
+
+        async function autoSyncData() {
+            if (isSyncing) return;
+            isSyncing = true;
+            const statusEl = document.getElementById('sync-status');
+            statusEl.innerText = "同步中...";
+            try {
+                const res = await fetch(`${SCRIPT_URL}?action=getCompetition`);
+                const data = await res.json();
+                data.forEach(item => updateUI(item.id, item.task, item.user, item.status, item.history));
+                statusEl.innerText = "已更新";
+                setTimeout(() => statusEl.innerText = "待命", 2000);
+            } catch (e) { statusEl.innerText = "失敗"; }
+            finally { isSyncing = false; }
+        }
+
+        async function markAction(id, type) {
+            activeBoxId = id;
+            if (type === 'reserve') {
+                document.getElementById('taskSearch').value = ''; filterTasks();
+                document.getElementById('taskModal').style.display = 'block';
+                document.getElementById('overlay').style.display = 'block';
+            } else { 
+                await pushData(id, null, null, '已完成'); 
+            }
+        }
+
+        async function confirmTask() {
+            const t = document.getElementById('taskSelect').value, u = document.getElementById('userSelect').value;
+            if(!t || !u) return alert("請選擇人員與任務");
+            await pushData(activeBoxId, t, u, '已保留');
+            closeModal();
+        }
+
+        async function pushData(id, t, u, s) {
+            const now = new Date();
+            const timeStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${now.getMinutes().toString().padStart(2,'0')}`;
+            try { 
+                await fetch(SCRIPT_URL, { 
+                    method: "POST", 
+                    body: JSON.stringify({ action: "updateCompetition", id, task: t, user: u, status: s, logTime: timeStr }) 
+                }); 
+                autoSyncData();
+            } catch (e) { alert("同步失敗！"); }
+        }
+
+        async function initData() {
+            try {
+                const res = await fetch(SCRIPT_URL);
+                const data = await res.json();
+                const uSel = document.getElementById('userSelect'), tSel = document.getElementById('taskSelect');
+                window.members = (data.members || []).slice(1).filter(r => !JSON.stringify(r).includes("管理員")).map(r => ({ text: (r[2]||"").trim(), value: (r[2]||"").trim() }));
+                allTasksBackup = [{text:"--選擇任務--",value:""}, ...["居民任務","顧客任務","培育任務","週花"].map(v=>({text:v,value:v}))];
+                if(data.flowers) data.flowers.slice(1).forEach(r => { if(r[0] && r[3]) { allTasksBackup.push({text:r[0], value:r[0]}); flowerOwnersMap[r[0]] = r[3].split(',').map(n=>n.trim()); } });
+                tSel.onchange = () => {
+                    const owners = flowerOwnersMap[tSel.value];
+                    uSel.innerHTML = '<option value="" disabled selected>--人員--</option><option value="沒指定">沒指定</option>';
+                    (owners ? window.members.filter(m=>owners.includes(m.value)) : window.members).forEach(m => uSel.options.add(new Option(m.text, m.value)));
+                };
+                filterTasks(); autoSyncData();
+                document.getElementById('loading').style.display = 'none';
+            } catch(e) {}
+        }
+
+        function filterTasks() {
+            const k = document.getElementById('taskSearch').value.toLowerCase(), s = document.getElementById('taskSelect');
+            s.innerHTML = ''; allTasksBackup.filter(t=>t.text.toLowerCase().includes(k)).forEach(t=>s.options.add(new Option(t.text,t.value)));
+            if(s.onchange) s.onchange();
+        }
+
+        function closeModal() { document.getElementById('taskModal').style.display='none'; document.getElementById('overlay').style.display='none'; }
+    </script>
+</body>
+</html>
